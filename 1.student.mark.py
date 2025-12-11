@@ -1,9 +1,23 @@
-n = int(input("Input number of student in class: "))
-
 student = []
+course = []
+mark = []
 
+while True:
+    n = input("Input number of student in class: ")
+
+    if not n or not n.isdigit():
+        print("Please enter the positive number of student in classs")
+        continue
+
+    n=int(n)
+    if n < 1:
+        print("Please enter number > 0")
+        continue
+
+    break
+    
 for i in range(n):
-    print("==========================\nInput infor student")
+    print("\n=====Input infor student=====")
     id = input("ID: ")
     name = input("Name: ")
     Dob = input("Dob: ")
@@ -13,12 +27,22 @@ for i in range(n):
     student.append(stu)
 
 print("======================")
-c = int(input("Input number of course: "))
+while True:
+    c = int(input("Input number of course: "))
 
-course = []
+    if not n or not n.isdigit():
+        print("Please enter the positive number of student in classs")
+        continue
+
+    n=int(n)
+    if n < 1:
+        print("Please enter number > 0")
+        continue
+
+    break
 
 for i in range(c):
-    print("==========================\nInput infor course")
+    print("\n=====Input infor course=====")
     id = input("ID: ")
     name = input("Name: ")
 
@@ -27,8 +51,6 @@ for i in range(c):
     course.append(cr)
 
 s = input("Select a course: ")
-
-mark = []
 
 d = [cr[0] for cr in course]
 if s not in d:
