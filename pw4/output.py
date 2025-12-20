@@ -2,7 +2,7 @@ import curses
 from domains import SystemManagementMark
 
 class CLI:
-    def __init__(self):
+    def __init__(self,system: SystemManagementMark):
         self.menu_items = [
             "Add new student",
             "Add new course",
@@ -13,8 +13,7 @@ class CLI:
             "Exit"
         ]
 
-        self.system = SystemManagementMark()
-        self.system.load_from_files()
+        self.system = system
 
         self.MENU_WIDTH = 45
         self.selected_menu = 0
@@ -269,6 +268,7 @@ class CLI:
                     in_scroll_mode = False
                     self.draw_init_CLI()
                 else:
+                    self.system.save_to_dat("students.dat")
                     break
 
             elif self.active_menu == 3 and key in [ord('w'), ord('W'), ord('s'), ord('S'), ord('q'), ord('Q')]:
@@ -335,6 +335,7 @@ class CLI:
 
                 elif key in (curses.KEY_ENTER, 10, 13):
                     if self.selected_menu == 6:
+                        self.system.save_to_dat("students.dat")
                         break
                     else:
                         self.active_menu = self.selected_menu

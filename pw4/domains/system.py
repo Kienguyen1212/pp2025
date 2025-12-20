@@ -3,6 +3,9 @@ import numpy as np
 from .student import Student
 from .course import Course
 from .mark import Mark
+import os
+import zipfile
+
 
 class SystemManagementMark:
     def __init__(self):
@@ -291,3 +294,27 @@ class SystemManagementMark:
         self.read_students_from_file(students_path)
         self.read_courses_from_file(courses_path)
         self.read_marks_from_file(marks_path)
+
+    def save_to_dat(self, dat_path="students.dat"):
+        self.write_students_to_file("students.txt")
+        self.write_courses_to_file("courses.txt")
+        self.write_marks_to_file("mark.txt")
+
+        with zipfile.ZipFile(dat_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            if os.path.exists("students.txt"):
+                z.write("students.txt")
+            if os.path.exists("courses.txt"):
+                z.write("courses.txt")
+            if os.path.exists("mark.txt"):
+                z.write("mark.txt")
+
+
+    def load_from_dat(self, dat_path="students.dat"):
+        if not os.path.exists(dat_path):
+            return False
+
+        with zipfile.ZipFile(dat_path, "r") as z:
+            z.extractall(".")
+
+        self.load_from_files("students.txt", "courses.txt", "mark.txt")
+        return True
