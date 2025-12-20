@@ -1,528 +1,781 @@
-from __future__ import annotations
-from abc import ABC, abstractmethod
+from datetime import datetime
+import math, numpy as np 
 import curses
-import curses.textpad
-import math
-from typing import Dict, List, Optional, Tuple
 
-try:
-    import numpy as np
-except Exception:
-    np = None
+class Student:
+    def __init__(self, sid, name, dob):
+        self.__id = sid
+        self.__name = name
+        self.__dob = dob
+        self.__gpa = 0
 
-
-def s_add(stdscr, y: int, x: int, text: str, attr: int = 0):
-    try:
-        h, w = stdscr.getmaxyx()
-        if y < 0 or y >= h:
-            return
-        if x < 0 or x >= w:
-            return
-        stdscr.addstr(y, x, text[: max(0, w - x - 1)], attr)
-    except curses.error:
-        pass
-
-
-def center(stdscr, y: int, text: str, attr: int = 0):
-    h, w = stdscr.getmaxyx()
-    x = max(0, (w - len(text)) // 2)
-    s_add(stdscr, y, x, text, attr)
-
-
-def draw_frame(stdscr, title: str, subtitle: str = ""):
-    stdscr.clear()
-    h, w = stdscr.getmaxyx()
-    center(stdscr, 1, title, curses.A_BOLD)
-    if subtitle:
-        center(stdscr, 2, subtitle, curses.A_DIM)
-    s_add(stdscr, 3, 2, "-" * max(0, w - 4), curses.A_DIM)
-    stdscr.refresh()
-
-
-def message(stdscr, title: str, lines: List[str]):
-    draw_frame(stdscr, title)
-    h, w = stdscr.getmaxyx()
-    top = 5
-    max_lines = max(1, h - top - 3)
-    for i in range(min(len(lines), max_lines)):
-        s_add(stdscr, top + i, 2, lines[i][: max(0, w - 4)])
-    s_add(stdscr, h - 2, 2, "Press any key...", curses.A_DIM)
-    stdscr.refresh()
-    stdscr.getch()
-
-
-def input_box(stdscr, title: str, prompt: str) -> str:
-    def validator(ch):
-        if ch in (10, 13):      # Enter
-            return 7            # Ctrl+G để kết thúc Textbox
-        if ch in (curses.KEY_BACKSPACE, 127, 8):
-            return 8            # Backspace
-        return ch
-
-    draw_frame(stdscr, title)
-    h, w = stdscr.getmaxyx()
-
-    s_add(stdscr, 5, 2, prompt[: max(0, w - 4)])
-    s_add(stdscr, 7, 2, "> ")
-    s_add(stdscr, h - 2, 2, "Enter: submit   Backspace: delete", curses.A_DIM)
-    stdscr.refresh()
-
-    box_w = max(10, min(60, w - 6))
-    edit = curses.newwin(1, box_w, 7, 4)
-    edit.bkgd(" ", curses.A_REVERSE)  # làm ô nhập nổi bật
-    edit.keypad(True)
-    edit.refresh()
-
-    curses.curs_set(1)
-    tb = curses.textpad.Textbox(edit)
-    s = tb.edit(validator).strip()
-    curses.curs_set(0)
-    return s
-
-
-
-def menu(stdscr, title: str, items: List[Tuple[str, str]]) -> str:
-    idx = 0
-    while True:
-        draw_frame(stdscr, title, "Up/Down to move, Enter to select, q to quit")
-        h, w = stdscr.getmaxyx()
-        if h < 14 or w < 60:
-            message(stdscr, "Resize Terminal", ["Please resize terminal (recommend >= 60x14)."])
-            continue
-
-        top = 6
-        visible = h - top - 4
-        start = 0
-        if idx >= visible:
-            start = idx - visible + 1
-
-        for i in range(start, min(len(items), start + visible)):
-            key, text = items[i]
-            line = f"{key}. {text}"
-            y = top + (i - start)
-            if i == idx:
-                s_add(stdscr, y, 4, line[: max(0, w - 8)], curses.A_REVERSE)
-            else:
-                s_add(stdscr, y, 4, line[: max(0, w - 8)])
-
-        stdscr.refresh()
-        k = stdscr.getch()
-        if k in (ord("q"), 27):
-            return "0"
-        if k in (curses.KEY_UP, ord("k")):
-            idx = (idx - 1) % len(items)
-        elif k in (curses.KEY_DOWN, ord("j")):
-            idx = (idx + 1) % len(items)
-        elif k in (10, 13, curses.KEY_ENTER):
-            return items[idx][0]
-
-
-def viewer(stdscr, title: str, lines: List[str]):
-    pos = 0
-    while True:
-        draw_frame(stdscr, title, "Up/Down scroll, PgUp/PgDn, q back")
-        h, w = stdscr.getmaxyx()
-        top = 5
-        view_h = max(1, h - top - 3)
-
-        pos = max(0, min(pos, max(0, len(lines) - view_h)))
-        for i in range(view_h):
-            if pos + i >= len(lines):
-                break
-            s_add(stdscr, top + i, 2, lines[pos + i][: max(0, w - 4)])
-
-        footer = f"Lines {pos+1}-{min(len(lines), pos+view_h)}/{len(lines)}"
-        s_add(stdscr, h - 2, 2, footer, curses.A_DIM)
-        stdscr.refresh()
-
-        k = stdscr.getch()
-        if k in (ord("q"), 27):
-            return
-        if k in (curses.KEY_UP, ord("k")):
-            pos = max(0, pos - 1)
-        elif k in (curses.KEY_DOWN, ord("j")):
-            pos = min(max(0, len(lines) - view_h), pos + 1)
-        elif k == curses.KEY_NPAGE:
-            pos = min(max(0, len(lines) - view_h), pos + view_h)
-        elif k == curses.KEY_PPAGE:
-            pos = max(0, pos - view_h)
-
-
-def input_non_empty(stdscr, prompt: str) -> str:
-    while True:
-        s = input_box(stdscr, "Input", prompt).strip()
-        if s:
-            return s
-        message(stdscr, "Error", ["Input cannot be empty."])
-
-
-def input_positive_int(stdscr, prompt: str) -> int:
-    while True:
-        s = input_box(stdscr, "Input", prompt).strip()
-        try:
-            n = int(s)
-            if n > 0:
-                return n
-            message(stdscr, "Error", ["Please enter a positive integer (>0)."])
-        except ValueError:
-            message(stdscr, "Error", ["Invalid integer."])
-
-
-def input_int_in_range(stdscr, prompt: str, lo: int, hi: int) -> int:
-    while True:
-        s = input_box(stdscr, "Input", prompt).strip()
-        try:
-            x = int(s)
-            if lo <= x <= hi:
-                return x
-            message(stdscr, "Error", [f"Please enter an integer in range [{lo}, {hi}]."])
-        except ValueError:
-            message(stdscr, "Error", ["Invalid integer."])
-
-
-def input_float_in_range(stdscr, prompt: str, lo: float, hi: float) -> float:
-    while True:
-        s = input_box(stdscr, "Input", prompt).strip()
-        try:
-            v = float(s)
-            if lo <= v <= hi:
-                return v
-            message(stdscr, "Error", [f"Please enter a value in range [{lo}, {hi}]."])
-        except ValueError:
-            message(stdscr, "Error", ["Invalid number."])
-
-
-def input_unique_id(stdscr, prompt: str, used: set) -> str:
-    while True:
-        s = input_non_empty(stdscr, prompt)
-        if s in used:
-            message(stdscr, "Error", ["ID already exists."])
-        else:
-            return s
-
-
-class Entity(ABC):
-    @abstractmethod
-    def key(self) -> str:
-        raise NotImplementedError
-
-    @abstractmethod
-    def input(self, stdscr) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def display(self) -> str:
-        raise NotImplementedError
-
-
-class Student(Entity):
-    def __init__(self, student_id: str = "") -> None:
-        self.__id = student_id
-        self.__name = ""
-        self.__dob = ""
-
-    @property
-    def student_id(self) -> str:
+    def get_id(self):
         return self.__id
 
-    @property
-    def name(self) -> str:
+    def get_name(self):
         return self.__name
 
-    def key(self) -> str:
+    def get_dob(self):
+        return self.__dob
+    
+    def get_gpa(self):
+        return self.__gpa
+
+    def set_gpa(self, gpa):
+        self.__gpa = gpa
+
+class Course:
+    def __init__(self, cid, name):
+        self.__id = cid
+        self.__name = name
+
+    def get_id(self):
         return self.__id
 
-    def input(self, stdscr) -> None:
-        self.__name = input_non_empty(stdscr, "Name: ")
-        self.__dob = input_non_empty(stdscr, "DoB (e.g., 2004-10-21): ")
-
-    def display(self) -> str:
-        return f"{self.__id} | {self.__name} | DoB: {self.__dob}"
+    def get_name(self):
+        return self.__name
 
 
-class Course(Entity):
-    def __init__(self, course_id: str = "") -> None:
-        self.__id = course_id
-        self.__name = ""
-        self.__credit = 0
+class Mark:
+    def __init__(self, cid):
+        self.__courseId = cid
+        self.__marks = {}     # {sid: [marks]}
+        self.__credits = {}   # {sid: [credits]}
 
-    @property
-    def course_id(self) -> str:
-        return self.__id
+    def add_mark(self, sid, mark):
+        mark = math.floor(mark * 10) / 10
+        self.__marks.setdefault(sid, []).append(mark)
 
-    @property
-    def credit(self) -> int:
-        return self.__credit
+    def add_credit(self, sid, credit):
+        self.__credits.setdefault(sid, []).append(credit)
 
-    def key(self) -> str:
-        return self.__id
+    def get_gpa_sid(self, sid):
+        if sid not in self.__marks or sid not in self.__credits:
+            return 0.0
 
-    def input(self, stdscr) -> None:
-        self.__name = input_non_empty(stdscr, "Course name: ")
-        self.__credit = input_positive_int(stdscr, "Credit (positive int): ")
+        marks = np.array(self.__marks[sid])
+        credits = np.array(self.__credits[sid])
 
-    def display(self) -> str:
-        return f"{self.__id} - {self.__name} (credit={self.__credit})"
+        gpa = np.sum(marks * credits) / np.sum(credits)
+        
+        return round(gpa, 1)
+    
+    def get_course_id(self):
+        return self.__courseId
 
+    def get_marks(self):
+        return self.__marks
+    
 
-class MarkSystem:
-    def __init__(self) -> None:
-        self.__students: List[Student] = []
-        self.__courses: List[Course] = []
-        self.__marks: Dict[str, Dict[str, float]] = {}
-        self.__min_mark = 0.0
-        self.__max_mark = 20.0
-
-    def floor_1_decimal(self, x: float) -> float:
-        return math.floor(x * 10.0) / 10.0
-
-    def calc_gpa(self, student_id: str) -> Optional[float]:
-        credit_map = {c.course_id: c.credit for c in self.__courses}
-        marks_list = []
-        credits_list = []
-        for course_id, st_marks in self.__marks.items():
-            if student_id in st_marks and course_id in credit_map:
-                marks_list.append(st_marks[student_id])
-                credits_list.append(credit_map[course_id])
-        if not marks_list:
-            return None
-        m = np.array(marks_list, dtype=float)
-        c = np.array(credits_list, dtype=float)
-        denom = float(c.sum())
-        if denom <= 0:
-            return None
-        return float((m * c).sum() / denom)
-
-    def sort_students_by_gpa_desc(self):
-        def k(st: Student):
-            g = self.calc_gpa(st.student_id)
-            if g is None:
-                return (1, 0.0)
-            return (0, -g)
-        self.__students.sort(key=k)
-
-    def input_students(self, stdscr) -> None:
-        n = input_positive_int(stdscr, "Number of students: ")
+class SystemManagementMark:
+    def __init__(self):
         self.__students = []
-        used = set()
-        for i in range(1, n + 1):
-            message(stdscr, "Student", [f"Student #{i}"])
-            sid = input_unique_id(stdscr, "ID: ", used)
-            st = Student(sid)
-            st.input(stdscr)
-            self.__students.append(st)
-            used.add(sid)
-        message(stdscr, "Done", ["Students saved."])
-
-    def input_courses(self, stdscr) -> None:
-        m = input_positive_int(stdscr, "Number of courses: ")
         self.__courses = []
-        used = set()
-        for i in range(1, m + 1):
-            message(stdscr, "Course", [f"Course #{i}"])
-            cid = input_unique_id(stdscr, "ID: ", used)
-            c = Course(cid)
-            c.input(stdscr)
-            self.__courses.append(c)
-            used.add(cid)
-        message(stdscr, "Done", ["Courses saved."])
+        self.__marks = []
+        
+    def count_gpa_for_all_student(self):
+        for stu in self.__students:
+            total_marks = []
+            total_credits = []
 
-    def list_courses(self, stdscr) -> None:
-        lines = ["Courses:"]
-        if not self.__courses:
-            lines.append("(empty)")
-        else:
-            for i, c in enumerate(self.__courses, start=1):
-                lines.append(f"{i}. {c.display()}")
-        viewer(stdscr, "Courses", lines)
+            for m in self.__marks:
+                sid = stu.get_id()
+                if sid in m._Mark__marks and sid in m._Mark__credits:
+                    total_marks.extend(m._Mark__marks[sid])
+                    total_credits.extend(m._Mark__credits[sid])
 
-    def list_students(self, stdscr) -> None:
-        lines = ["Students:"]
-        if not self.__students:
-            lines.append("(empty)")
-        else:
-            for i, st in enumerate(self.__students, start=1):
-                g = self.calc_gpa(st.student_id)
-                g_str = f"{g:.4f}" if g is not None else "N/A"
-                lines.append(f"{i}. {st.display()} | GPA={g_str}")
-        viewer(stdscr, "Students", lines)
+            if total_credits:
+                marks = np.array(total_marks)
+                credits = np.array(total_credits)
+                gpa = np.sum(marks * credits) / np.sum(credits)
+                stu.set_gpa(round(gpa, 1))
+            else:
+                stu.set_gpa(0.0)
 
-    def select_course(self, stdscr) -> Optional[Course]:
-        if not self.__courses:
-            message(stdscr, "Error", ["No courses available."])
-            return None
+    def get_students(self):
+        return list(self.__students)
 
-        lines = ["Courses:"]
-        for i, c in enumerate(self.__courses, start=1):
-            lines.append(f"{i}. {c.display()}")
-        viewer(stdscr, "Select Course", lines + ["", "Tip: You can choose by index or by ID."])
+    def get_courses(self):
+        return list(self.__courses)
 
-        mode = input_non_empty(stdscr, "Choose by index (1) or ID (2): ")
-        if mode == "1":
-            idx = input_int_in_range(stdscr, "Course index: ", 1, len(self.__courses))
-            return self.__courses[idx - 1]
-        if mode == "2":
-            cid = input_non_empty(stdscr, "Course ID: ")
+    def get_marks(self):
+        return list(self.__marks)
+    
+    def get_students_sorted_by_gpa(self):
+        self.count_gpa_for_all_student()
+        return sorted(self.__students, key=lambda s: s.get_gpa(), reverse=True)
+        
+    def get_students_sorted_by_gpa_data(self):
+        self.count_gpa_for_all_student()
+        students = sorted(self.__students, key=lambda s: s.get_gpa(), reverse=True)
+        
+        stu_list = []
+        
+        for stu in students:
+            stu_list.append({
+                "id" : stu.get_id(),
+                "name" : stu.get_name(),
+                "gpa" : stu.get_gpa()
+            })
+            
+        return stu_list
+    
+    def get_courses_data(self):
+        courses = []
+        for course in self.__courses:
+            courses.append({
+                "id": course.get_id(),
+                "name": course.get_name(),
+            })
+        return courses
+
+    def get_students_data(self):
+        students = []
+        for stu in self.__students:
+            students.append({
+                "id": stu.get_id(),
+                "name": stu.get_name(),
+                "dob": stu.get_dob(),
+            })
+        return students
+
+    def isStudentId(self, sid):
+        return sid.isalnum() and len(sid) >= 5
+
+    def isStudentName(self, name):
+        return name.strip() != "" and all(c.isalpha() or c.isspace() for c in name)
+
+    def isStudentDob(self, dob):
+        try:
+            datetime.strptime(dob, "%d/%m/%Y")
+            return True
+        except ValueError:
+            return False
+
+    def isCourseId(self, cid):
+        return cid.isalnum()
+
+    def isCourseName(self, name):
+        return name.strip() != ""
+
+    def inputStudents(self):
+        n = int(input("Number of students: "))
+        for i in range(n):
+            print(f"\nStudent {i+1}")
+            sid = input("  Id: ")
+            while not self.isStudentId(sid):
+                sid = input("  Invalid Id: ")
+
+            name = input("  Name: ")
+            while not self.isStudentName(name):
+                name = input("  Invalid Name: ")
+
+            dob = input("  DoB (dd/mm/yyyy): ")
+            while not self.isStudentDob(dob):
+                dob = input("  Invalid DoB: ")
+
+            self.__students.append(Student(sid, name, dob))
+
+    def inputCourses(self):
+        n = int(input("Number of courses: "))
+        for i in range(n):
+            print(f"\nCourse {i+1}")
+            cid = input("  Course Id: ")
+            while not self.isCourseId(cid):
+                cid = input("  Invalid Course Id: ")
+
+            name = input("  Course Name: ")
+            while not self.isCourseName(name):
+                name = input("  Invalid Course Name: ")
+
+            self.__courses.append(Course(cid, name))
+
+    def inputMarks(self):
+        for course in self.__courses:
+            print(f"\nMarks for course {course.get_id()} - {course.get_name()}")
+            credit = int(input("  Credit: "))
+            mark = Mark(course.get_id())
+
+            for stu in self.__students:
+                while True:
+                    try:
+                        m = float(input(f"  {stu.get_id()}: "))
+                        if 0 <= m <= 10:
+                            break
+                    except ValueError:
+                        pass
+                mark.add_mark(stu.get_id(), m)
+                mark.add_credit(stu.get_id(), credit)
+
+            self.__marks.append(mark)
+            
+    def write_students_to_file(self, path="students.txt"):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str(len(self.__students)) + "\n")
+            for s in self.__students:
+                f.write(s.get_id() + "\n")
+                f.write(s.get_name() + "\n")
+                f.write(s.get_dob() + "\n")
+                
+    def write_courses_to_file(self, path="courses.txt"):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str(len(self.__courses)) + "\n")
             for c in self.__courses:
-                if c.course_id == cid:
-                    return c
-            message(stdscr, "Error", ["Course ID not found."])
-            return None
+                f.write(c.get_id() + "\n")
+                f.write(c.get_name() + "\n")
+                
+    def write_marks_to_file(self, path="mark.txt"):
+        with open(path, "w", encoding="utf-8") as f:
+            for m in self.__marks:
+                f.write(m.get_course_id() + "\n")
+                for sid, scores in m.get_marks().items():
+                    for score in scores:
+                        f.write(f"{sid} {score}\n")
+                f.write("\n")
 
-        message(stdscr, "Error", ["Invalid choice. Use 1 or 2."])
-        return None
+    def showStudents(self):
+        print("\n===== STUDENT LIST =====")
+        print("-" * 60)
+        print(f"{'No':>3} | {'ID':12} | {'Name':20} | {'DoB':>10}")
+        print("-" * 60)
 
-    def select_student(self, stdscr) -> Optional[Student]:
-        if not self.__students:
-            message(stdscr, "Error", ["No students available."])
-            return None
+        for i, s in enumerate(self.__students, start=1):
+            print(f"{i:3} | {s.get_id():12} | {s.get_name():20} | {s.get_dob():>10}")
 
-        lines = ["Students:"]
-        for i, st in enumerate(self.__students, start=1):
-            lines.append(f"{i}. {st.display()}")
-        viewer(stdscr, "Select Student", lines + ["", "Tip: You can choose by index or by ID."])
+    def showStudentsGpa(self):
+        print("\n===== STUDENT GPA LIST =====")
+        print("-" * 50)
+        print(f"{'No':<4} | {'Student ID':<12} | {'Name':<20} | {'GPA':>5}")
+        print("-" * 50)
 
-        mode = input_non_empty(stdscr, "Choose by index (1) or ID (2): ")
-        if mode == "1":
-            idx = input_int_in_range(stdscr, "Student index: ", 1, len(self.__students))
-            return self.__students[idx - 1]
-        if mode == "2":
-            sid = input_non_empty(stdscr, "Student ID: ")
-            for st in self.__students:
-                if st.student_id == sid:
-                    return st
-            message(stdscr, "Error", ["Student ID not found."])
-            return None
+        for i, s in enumerate(self.__students, start=1):
+            print(f"{i:<4} | {s.get_id():<12} | {s.get_name():<20} | {s.get_gpa():>5.1f}")
 
-        message(stdscr, "Error", ["Invalid choice. Use 1 or 2."])
-        return None
+        print("-" * 50)
 
-    def input_marks_for_course(self, stdscr) -> None:
-        if not self.__students:
-            message(stdscr, "Error", ["Input students first."])
-            return
-        if not self.__courses:
-            message(stdscr, "Error", ["Input courses first."])
-            return
+    def showMarks(self):
+        print("\n===== MARK LIST =====")
 
-        course = self.select_course(stdscr)
-        if course is None:
-            return
+        for m in self.__marks:
+            course_name = ""
+            for c in self.__courses:
+                if c.get_id() == m.get_course_id():
+                    course_name = c.get_name()
+                    break
 
-        cid = course.course_id
-        if cid not in self.__marks:
-            self.__marks[cid] = {}
+            print(f"\nCourse: {m.get_course_id()} - {course_name}")
+            print("-" * 40)
 
-        message(
-            stdscr,
-            "Input Marks",
-            [
-                f"Course: {course.display()}",
-                f"Range: [{self.__min_mark}, {self.__max_mark}]",
-                "Scores will be floor-rounded to 1 decimal."
+            for sid, score in m.get_marks().items():
+                stu_name = ""
+                for s in self.__students:
+                    if s.get_id() == sid:
+                        stu_name = s.get_name()
+                        break
+
+                score_str = ", ".join(f"{s:.1f}" for s in score)
+                print(f"{sid:12} | {stu_name:<20} | {score_str}")
+    
+    def showCourses(self):
+        print("\n===== COURSE LIST =====")
+        print("-" * 60)
+        print(f"{'No':>3} | {'Course ID':12} | {'Course Name':30}")
+        print("-" * 60)
+
+        for i, c in enumerate(self.__courses, start=1):
+            print(f"{i:3} | {c.get_id():12} | {c.get_name():30}")
+
+
+    def showStudentGpaDescending(self):
+        self.__students.sort(key=lambda s: s.get_gpa(), reverse=True)
+        self.showStudentsGpa()
+
+    def readAllInput(self):
+        self.inputStudents()
+        self.inputCourses()
+        self.inputMarks()
+        
+    def showAll(self):
+        self.showStudents()
+        self.showCourses()
+        self.showMarks()    
+        
+    def inputAll(self):
+        self.inputStudents()
+        self.inputCourses()
+        self.inputMarks()
+
+    def read_students_from_file(self, path: str):
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+
+        n = int(lines[0])
+        idx = 1
+        for _ in range(n):
+            sid = lines[idx]; idx += 1
+            name = lines[idx]; idx += 1
+            dob = lines[idx]; idx += 1
+            self.__students.append(Student(sid, name, dob))
+
+    def read_courses_from_file(self, path: str):
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+
+        n = int(lines[0])
+        idx = 1
+        for _ in range(n):
+            cid = lines[idx]; idx += 1
+            name = lines[idx]; idx += 1
+            self.__courses.append(Course(cid, name))
+
+    def read_marks_from_file(self, path: str, default_credit: int = 1):
+        """
+        Format marks.txt:
+        MATH01
+        STU01 8.5
+        STU02 7.0
+        <Some newline>
+        ICT01
+        STU01 8.0
+        ...
+        """
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+
+        current_mark_obj = None
+        for line in lines:
+            parts = line.split()
+            if len(parts) == 1:
+                # dòng course id mới
+                cid = parts[0]
+                current_mark_obj = Mark(cid)
+                self.__marks.append(current_mark_obj)
+            elif len(parts) == 2 and current_mark_obj is not None:
+                sid, mark_str = parts
+                try:
+                    m_val = float(mark_str)
+                except ValueError:
+                    continue
+                current_mark_obj.add_mark(sid, m_val)
+                current_mark_obj.add_credit(sid, default_credit)
+
+    def load_from_files(self,
+                        students_path: str = "students.txt",
+                        courses_path: str = "courses.txt",
+                        marks_path: str = "mark.txt"):
+        self.read_students_from_file(students_path)
+        self.read_courses_from_file(courses_path)
+        self.read_marks_from_file(marks_path)
+
+
+class Input:
+    def __init__(self, system: SystemManagementMark):
+        self.system = system
+
+    def input_all(self):
+        self.system.inputStudents()
+        self.system.inputCourses()
+        self.system.inputMarks()
+
+class CLI:
+    def __init__(self):
+        self.menu_items = [
+            "Add new student",
+            "Add new course",
+            "Add marks for course",
+            "View student list",
+            "View course list",
+            "View student's gpa",
+            "Exit"
+        ]
+        
+        # Loading inital data
+        self.system = SystemManagementMark()
+        self.system.load_from_files()
+        
+        self.MENU_WIDTH = 45
+        self.selected_menu = 0
+        self.active_menu = 0 
+        
+        # Fake data 
+        self.students = []
+        for i in range(30):
+            self.students.append({"id": f"S{i+1:03d}", "name": f"Student {i+1}", "gpa": 3.0 + (i % 10) / 10})
+            
+        self.courses = []
+        for i in range(20):
+            self.courses.append({"id": f"CS{i+101}", "name": f"Course {i+1}"})
+            
+        # Real data
+        self.students_gpa_data = self.system.get_students_sorted_by_gpa_data()
+        self.courses_data = self.system.get_courses_data()
+        self.students_data = self.system.get_students_data()
+        
+    
+    def start(self):
+        curses.wrapper(self.run)
+    
+    def init_CLI(self, stdscr):
+        curses.curs_set(0)
+        stdscr.keypad(True)
+        curses.noecho()
+        curses.cbreak()
+        curses.set_escdelay(25)
+        
+        self.height, self.width = stdscr.getmaxyx()
+        if self.height < 17 or self.width < 100:
+            raise Exception("Terminal too small! Minimum size: 100x17")
+        
+        if curses.has_colors():
+            curses.start_color()
+            curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
+            curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)
+            curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)
+            curses.init_pair(4, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+            curses.init_pair(5, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        
+        self.menu_win = curses.newwin(self.height, self.MENU_WIDTH, 0, 0)
+        self.content_win = curses.newwin(
+            self.height, 
+            self.width - self.MENU_WIDTH,
+            0, 
+            self.MENU_WIDTH
+        )
+        
+        self.menu_win.keypad(True)
+        self.content_win.keypad(True)
+        
+        pad_width = max(49, self.width - self.MENU_WIDTH - 4)
+        self.students_data_pad = curses.newpad(max(1, len(self.students_data)) + 1, pad_width)
+        self.courses_data_pad = curses.newpad(max(1, len(self.courses_data)) + 1, pad_width)
+        self.students_gpa_data_pad = curses.newpad(max(1, len(self.students_gpa_data)) + 1, pad_width)
+
+        self.student_scroll_pos = 0
+        self.course_scroll_pos = 0
+        self.gpa_scroll_pos = 0
+
+        # Populate student pad
+        for i, student in enumerate(self.students_data):
+            # dob is a string like "dd/mm/yyyy"
+            self.students_data_pad.addstr(
+                i,
+                0,
+                f"{student['id']:<10} {student['name']:<25} {student['dob']:<12}",
+            )
+
+        # Populate course pad
+        for i, course in enumerate(self.courses_data):
+            self.courses_data_pad.addstr(i, 0, f"{course['id']:<12} {course['name']:<30}")
+
+        # Populate GPA pad
+        for i, student in enumerate(self.students_gpa_data):
+            self.students_gpa_data_pad.addstr(
+                i, 0, f"{student['id']:<10} {student['name']:<25} {student['gpa']:<10.2f}"
+            )
+        
+    
+    def draw_menu_win(self):
+        self.menu_win.erase()
+        self.menu_win.border()
+        self.menu_win.bkgd(' ', curses.color_pair(2))
+        self.menu_win.addstr(0, 2, " MENU ", curses.color_pair(4) | curses.A_BOLD)
+        
+        for i, item in enumerate(self.menu_items):
+            if i == self.selected_menu:
+                self.menu_win.attron(curses.color_pair(1) | curses.A_BOLD)
+                self.menu_win.addstr(i + 2, 2, f"> {item}")
+                self.menu_win.attroff(curses.color_pair(1) | curses.A_BOLD)
+            else:
+                self.menu_win.addstr(i + 2, 2, f"  {item}")
+        
+        # Add help text at bottom, accounting for border
+        help_y = self.height - 3
+        self.menu_win.addstr(help_y, 2, "Up/Down: Navigate", curses.color_pair(3))
+        self.menu_win.addstr(help_y + 1, 2, "Enter: Open | ESC: Exit", curses.color_pair(3))
+        
+        self.menu_win.noutrefresh()
+    
+    def draw_content_win(self):
+        self.content_win.erase()
+        self.content_win.border()
+        self.content_win.bkgd(' ', curses.color_pair(2))
+        
+        # Default welcome screen
+        if self.active_menu == -1:
+            self.content_win.addstr(0, 2, " WELCOME ", curses.color_pair(4) | curses.A_BOLD)
+            
+            # Welcome content
+            center_y = self.height // 2 - 5
+            center_x = (self.width - self.MENU_WIDTH) // 2
+            
+            welcome_text = [
+                "╔═══════════════════════════════════╗",
+                "║   STUDENT MANAGEMENT SYSTEM       ║",
+                "╚═══════════════════════════════════╝",
+                "",
+                "Welcome to the Student Management CLI",
+                "",
+                "Features:",
+                "• Add and manage students",
+                "• Add and manage courses",
+                "     • Track student marks and GPA",
+                "   • View comprehensive reports",
+                "",
+                "  Select a menu item to begin!"
             ]
+            
+            for i, line in enumerate(welcome_text):
+                x_pos = center_x - len(line) // 2
+                if x_pos < 2:
+                    x_pos = 2
+                try:
+                    if i < 3:  # Header
+                        self.content_win.addstr(center_y + i, x_pos, line, curses.color_pair(4) | curses.A_BOLD)
+                    elif "Features:" in line or "Getting Started:" in line:
+                        self.content_win.addstr(center_y + i, x_pos, line, curses.color_pair(3) | curses.A_BOLD)
+                    else:
+                        self.content_win.addstr(center_y + i, x_pos, line)
+                except:
+                    pass  # Ignore if text doesn't fit
+            
+            self.content_win.noutrefresh()
+            return
+        
+        # Regular menu content
+        menu_option = self.menu_items[self.active_menu]
+        self.content_win.addstr(0, 2, f" {menu_option.upper()} ", curses.color_pair(4) | curses.A_BOLD)
+        
+        # Display different content based on selected menu
+        if self.active_menu == 0:  # Add new student
+            self.content_win.addstr(2, 2, "Add New Student Form", curses.A_UNDERLINE)
+            self.content_win.addstr(4, 2, "Student ID: _____________")
+            self.content_win.addstr(5, 2, "Name:       _____________")
+            self.content_win.addstr(6, 2, "GPA:        _____________")
+            self.content_win.addstr(8, 2, "[Press Enter to submit]", curses.color_pair(3))
+            self.content_win.addstr(10, 2, "Press Q to return to home", curses.color_pair(5))
+        
+        elif self.active_menu == 1:  # Add new course
+            self.content_win.addstr(2, 2, "Add New Course Form", curses.A_UNDERLINE)
+            self.content_win.addstr(4, 2, "Course ID:   _____________")
+            self.content_win.addstr(5, 2, "Course Name: _____________")
+            self.content_win.addstr(8, 2, "[Press Enter to submit]", curses.color_pair(3))
+            self.content_win.addstr(10, 2, "Press Q to return to home", curses.color_pair(5))
+        
+        elif self.active_menu == 2:  # Add marks
+            self.content_win.addstr(2, 2, "Add Marks for Course", curses.A_UNDERLINE)
+            self.content_win.addstr(4, 2, "Student ID: _____________")
+            self.content_win.addstr(5, 2, "Course ID:  _____________")
+            self.content_win.addstr(6, 2, "Mark:       _____________")
+            self.content_win.addstr(8, 2, "[Press Enter to submit]", curses.color_pair(3))
+            self.content_win.addstr(10, 2, "Press Q to return to home", curses.color_pair(5))
+        
+        elif self.active_menu == 3:  # View student list
+            self.content_win.addstr(2, 2, "Student List", curses.A_UNDERLINE)
+            y = 4
+            self.content_win.addstr(y, 2, f"{'ID':<10} {'Name':<25} {'DOB':<10}", curses.A_BOLD)
+            y += 1
+            self.content_win.addstr(y, 2, "-" * 45)
+            
+            help_y = self.height - 2
+            self.content_win.addstr(help_y, 2, "W/S: Scroll | Q: Back to Home", curses.color_pair(5))
+            
+            total = len(self.students_data)
+            visible = self.height - 8
+            info = f"[{self.student_scroll_pos + 1}-{min(self.student_scroll_pos + visible, total)}/{total}]"
+            self.content_win.addstr(2, self.width - self.MENU_WIDTH - len(info) - 4, info, curses.color_pair(3))
+        
+        elif self.active_menu == 4:  # View course list
+            self.content_win.addstr(2, 2, "Course List", curses.A_UNDERLINE)
+            y = 4
+            self.content_win.addstr(y, 2, f"{'ID':<12} {'Course Name':<30}", curses.A_BOLD)
+            y += 1
+            self.content_win.addstr(y, 2, "-" * 42)
+            
+            help_y = self.height - 2
+            self.content_win.addstr(help_y, 2, "W/S: Scroll | Q: Back to Home", curses.color_pair(5))
+            
+            # Show scroll position
+            total = len(self.courses_data)
+            visible = self.height - 8
+            info = f"[{self.course_scroll_pos + 1}-{min(self.course_scroll_pos + visible, total)}/{total}]"
+            self.content_win.addstr(2, self.width - self.MENU_WIDTH - len(info) - 4, info, curses.color_pair(3))
+        
+        elif self.active_menu == 5:  # View GPA
+            self.content_win.addstr(2, 2, "Student's GPA List", curses.A_UNDERLINE)
+            y = 4
+            self.content_win.addstr(y, 2, f"{'ID':<10} {'Name':<25} {'GPA':<10}", curses.A_BOLD)
+            y += 1
+            self.content_win.addstr(y, 2, "-" * 45)
+            
+            help_y = self.height - 2
+            self.content_win.addstr(help_y, 2, "W/S: Scroll | Q: Back to Home", curses.color_pair(5))
+            
+            total = len(self.students_gpa_data)
+            visible = self.height - 8
+            info = f"[{self.gpa_scroll_pos + 1}-{min(self.gpa_scroll_pos + visible, total)}/{total}]"
+            self.content_win.addstr(2, self.width - self.MENU_WIDTH - len(info) - 4, info, curses.color_pair(3))
+        
+        elif self.active_menu == 6:  # Exit
+            self.content_win.addstr(2, 2, "Exit Application", curses.A_UNDERLINE)
+            self.content_win.addstr(4, 2, "Press Enter to exit", curses.color_pair(3))
+            self.content_win.addstr(5, 2, "or ESC to cancel")
+        
+        self.content_win.noutrefresh()
+    
+    def refresh_student_pad(self):
+        """Refresh student pad with current scroll position."""
+        pad_top = self.student_scroll_pos
+        screen_top = 7
+        screen_bottom = self.height - 3
+        screen_left = self.MENU_WIDTH + 2
+        screen_right = self.width - 2
+
+        self.students_data_pad.noutrefresh(
+            pad_top, 0,
+            screen_top, screen_left,
+            screen_bottom, screen_right,
         )
 
-        for st in self.__students:
-            raw = input_float_in_range(
-                stdscr,
-                f"Mark for {st.student_id} - {st.name}: ",
-                self.__min_mark,
-                self.__max_mark
-            )
-            self.__marks[cid][st.student_id] = self.floor_1_decimal(raw)
+    def refresh_course_pad(self):
+        """Refresh course pad with current scroll position."""
+        pad_top = self.course_scroll_pos
+        screen_top = 7
+        screen_bottom = self.height - 3
+        screen_left = self.MENU_WIDTH + 2
+        screen_right = self.width - 2
 
-        message(stdscr, "Done", ["Marks updated."])
+        self.courses_data_pad.noutrefresh(
+            pad_top, 0,
+            screen_top, screen_left,
+            screen_bottom, screen_right,
+        )
 
-    def show_marks_for_course(self, stdscr) -> None:
-        if not self.__students or not self.__courses:
-            message(stdscr, "Error", ["Need students and courses first."])
-            return
+    def refresh_gpa_pad(self):
+        """Refresh GPA pad with current scroll position."""
+        pad_top = self.gpa_scroll_pos
+        screen_top = 7
+        screen_bottom = self.height - 3
+        screen_left = self.MENU_WIDTH + 2
+        screen_right = self.width - 2
 
-        course = self.select_course(stdscr)
-        if course is None:
-            return
+        self.students_gpa_data_pad.noutrefresh(
+            pad_top, 0,
+            screen_top, screen_left,
+            screen_bottom, screen_right,
+        )
+    
+    def draw_init_CLI(self):
+        self.draw_menu_win()
+        self.draw_content_win()
+        
+        if self.active_menu == 3:
+            self.refresh_student_pad()
+        elif self.active_menu == 4:
+            self.refresh_course_pad()
+        elif self.active_menu == 5:
+            self.refresh_gpa_pad()
 
-        cid = course.course_id
-        cm = self.__marks.get(cid, {})
-
-        lines = [f"Marks for {course.display()}:"]
-        for st in self.__students:
-            if st.student_id in cm:
-                lines.append(f"{st.student_id} - {st.name}: {cm[st.student_id]:.1f}")
-            else:
-                lines.append(f"{st.student_id} - {st.name}: N/A")
-
-        viewer(stdscr, "Marks", lines)
-
-    def show_gpa_for_student(self, stdscr) -> None:
-        if not self.__students:
-            message(stdscr, "Error", ["Input students first."])
-            return
-
-        st = self.select_student(stdscr)
-        if st is None:
-            return
-
-        g = self.calc_gpa(st.student_id)
-        if g is None:
-            message(stdscr, "GPA", [f"{st.student_id} - {st.name}", "GPA: N/A (no marks yet)"])
-        else:
-            message(stdscr, "GPA", [f"{st.student_id} - {st.name}", f"GPA: {g:.4f}"])
-
-    def run(self, stdscr) -> None:
-        items = [
-            ("1", "Input students"),
-            ("2", "Input courses"),
-            ("3", "Select a course, input marks (floor 1 decimal)"),
-            ("4", "List courses"),
-            ("5", "List students (with GPA)"),
-            ("6", "Show student marks for a course"),
-            ("7", "Show GPA for a student"),
-            ("8", "Sort students by GPA descending"),
-            ("0", "Exit"),
-        ]
-
+        curses.doupdate()
+    
+    def run(self, stdscr):
+        self.init_CLI(stdscr)
+        self.draw_init_CLI()
+        
+        in_scroll_mode = False  
+        
         while True:
-            choice = menu(stdscr, "Practice 3 - Student Mark Management", items)
-            if choice == "0":
-                return
-            if choice == "1":
-                self.input_students(stdscr)
-            elif choice == "2":
-                self.input_courses(stdscr)
-            elif choice == "3":
-                self.input_marks_for_course(stdscr)
-            elif choice == "4":
-                self.list_courses(stdscr)
-            elif choice == "5":
-                self.list_students(stdscr)
-            elif choice == "6":
-                self.show_marks_for_course(stdscr)
-            elif choice == "7":
-                self.show_gpa_for_student(stdscr)
-            elif choice == "8":
-                self.sort_students_by_gpa_desc()
-                message(stdscr, "Done", ["Students sorted by GPA descending."])
-            else:
-                message(stdscr, "Error", ["Invalid choice."])
+            key = stdscr.getch()
+            
+            if key == 27:  # ESC key
+                if in_scroll_mode:
+                    in_scroll_mode = False
+                    self.draw_init_CLI()
+                else:
+                    break
+            
+            elif self.active_menu == 3 and key in [ord('w'), ord('W'), ord('s'), ord('S'), ord('q'), ord('Q')]:
+                visible_lines = self.height - 8
 
+                if key in [ord('w'), ord('W')]:
+                    in_scroll_mode = True
+                    self.student_scroll_pos = max(0, self.student_scroll_pos - 1)
+                    self.draw_init_CLI()
+                elif key in [ord('s'), ord('S')]:
+                    in_scroll_mode = True
+                    max_scroll = max(0, len(self.students_data) - visible_lines)
+                    self.student_scroll_pos = min(max_scroll, self.student_scroll_pos + 1)
+                    self.draw_init_CLI()
+                elif key in [ord('q'), ord('Q')]:
+                    in_scroll_mode = False
+                    self.active_menu = -1
+                    self.draw_init_CLI()
 
-def main(stdscr):
-    if np is None:
-        stdscr.clear()
-        s_add(stdscr, 1, 2, "numpy is not installed.", curses.A_BOLD)
-        s_add(stdscr, 3, 2, "Fix (Ubuntu): sudo apt install python3-numpy")
-        s_add(stdscr, 4, 2, "or inside venv: pip install numpy")
-        s_add(stdscr, 6, 2, "Press any key to exit...", curses.A_DIM)
-        stdscr.refresh()
-        stdscr.getch()
-        return
+            elif self.active_menu == 4 and key in [ord('w'), ord('W'), ord('s'), ord('S'), ord('q'), ord('Q')]:
+                visible_lines = self.height - 8
 
-    curses.curs_set(0)
-    stdscr.keypad(True)
-    MarkSystem().run(stdscr)
+                if key in [ord('w'), ord('W')]:
+                    in_scroll_mode = True
+                    self.course_scroll_pos = max(0, self.course_scroll_pos - 1)
+                    self.draw_init_CLI()
+                elif key in [ord('s'), ord('S')]:
+                    in_scroll_mode = True
+                    max_scroll = max(0, len(self.courses_data) - visible_lines)
+                    self.course_scroll_pos = min(max_scroll, self.course_scroll_pos + 1)
+                    self.draw_init_CLI()
+                elif key in [ord('q'), ord('Q')]:
+                    in_scroll_mode = False
+                    self.active_menu = -1
+                    self.draw_init_CLI()
 
+            elif self.active_menu == 5 and key in [ord('w'), ord('W'), ord('s'), ord('S'), ord('q'), ord('Q')]:
+                visible_lines = self.height - 8
+
+                if key in [ord('w'), ord('W')]:
+                    in_scroll_mode = True
+                    self.gpa_scroll_pos = max(0, self.gpa_scroll_pos - 1)
+                    self.draw_init_CLI()
+                elif key in [ord('s'), ord('S')]:
+                    in_scroll_mode = True
+                    max_scroll = max(0, len(self.students_gpa_data) - visible_lines)
+                    self.gpa_scroll_pos = min(max_scroll, self.gpa_scroll_pos + 1)
+                    self.draw_init_CLI()
+                elif key in [ord('q'), ord('Q')]:
+                    in_scroll_mode = False
+                    self.active_menu = -1
+                    self.draw_init_CLI()
+
+            elif self.active_menu in [0, 1, 2] and key in [ord('q'), ord('Q')]:
+                # Quay về home screen
+                self.active_menu = -1
+                self.draw_init_CLI()
+            
+            elif not in_scroll_mode:
+                if key == curses.KEY_UP:
+                    self.selected_menu = max(0, self.selected_menu - 1)
+                    self.draw_menu_win()
+                    curses.doupdate()
+                
+                elif key == curses.KEY_DOWN:
+                    self.selected_menu = min(len(self.menu_items) - 1, self.selected_menu + 1)
+                    self.draw_menu_win()
+                    curses.doupdate()
+                
+                elif key in (curses.KEY_ENTER, 10, 13):  # Enter key
+                    if self.selected_menu == 6:  # Exit option
+                        break
+                    else:
+                        self.active_menu = self.selected_menu
+                        self.student_scroll_pos = 0
+                        self.course_scroll_pos = 0
+                        self.gpa_scroll_pos = 0
+
+                        if self.active_menu in [3, 4, 5]:
+                            in_scroll_mode = True
+                        
+                        self.draw_init_CLI()
 
 if __name__ == "__main__":
-    curses.wrapper(main)
+    # After run python 3.student.mark.py, you should press Enter, q to use fully this CLI.
+    # Now, three first function aren't avaleble.
+    # The option is so boring!
+    CLI().start()
